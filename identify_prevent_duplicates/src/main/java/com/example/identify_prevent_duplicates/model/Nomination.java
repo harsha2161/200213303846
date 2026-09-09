@@ -1,4 +1,5 @@
 package com.example.identify_prevent_duplicates.model;
+
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
@@ -10,13 +11,16 @@ import java.time.LocalDateTime;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-
+@Builder
 public class Nomination {
     @Id
     private String nominate_id;
     private String employee_name;
     private String department_id;
     private String training_program_id;
+    private String designation;
+    private Integer years_of_service;
     private String status;
     private LocalDateTime nominated_at;
 }
+

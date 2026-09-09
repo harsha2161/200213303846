@@ -18,6 +18,15 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(responseDTO, HttpStatus.CONFLICT);
     }
 
+    @ExceptionHandler(IneligibleNominationException.class)
+    public ResponseEntity<ResponseDTO> handleIneligibleNomination(IneligibleNominationException ex) {
+        ResponseDTO responseDTO = ResponseDTO.builder()
+                .message(ex.getMessage())
+                .status(HttpStatus.BAD_REQUEST)
+                .build();
+        return new ResponseEntity<>(responseDTO, HttpStatus.BAD_REQUEST);
+    }
+
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ResponseDTO> handleRuntimeException(RuntimeException ex) {
         ResponseDTO responseDTO = ResponseDTO.builder()
@@ -27,3 +36,4 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(responseDTO, HttpStatus.BAD_REQUEST);
     }
 }
+

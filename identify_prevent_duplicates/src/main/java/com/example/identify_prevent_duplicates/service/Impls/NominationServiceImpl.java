@@ -2,9 +2,13 @@ package com.example.identify_prevent_duplicates.service.Impls;
 
 import com.example.identify_prevent_duplicates.DTO.NominationDTO;
 import com.example.identify_prevent_duplicates.DTO.ResponseDTO;
-import com.example.identify_prevent_duplicates.exception.DuplicateNominationException;
+import com.example.identify_prevent_duplicates.Repo.EmployeeRepo;
 import com.example.identify_prevent_duplicates.Repo.NominationRepo;
 import com.example.identify_prevent_duplicates.Repo.TrainingProgramRepo;
+import com.example.identify_prevent_duplicates.eligibility.EligibilityContext;
+import com.example.identify_prevent_duplicates.eligibility.EligibilityEngine;
+import com.example.identify_prevent_duplicates.exception.DuplicateNominationException;
+import com.example.identify_prevent_duplicates.model.Employee;
 import com.example.identify_prevent_duplicates.model.Nomination;
 import com.example.identify_prevent_duplicates.model.TrainingProgram;
 import com.example.identify_prevent_duplicates.service.NominationService;
@@ -27,12 +31,37 @@ public class NominationServiceImpl implements NominationService {
     @Autowired
     private TrainingProgramRepo trainingProgramRepo;
 
+    @Autowired
+    private EmployeeRepo employeeRepo;
+
+    @Autowired
+    private EligibilityEngine eligibilityEngine;
+
     @Override
     @Transactional
     public ResponseEntity<ResponseDTO> addNomination(NominationDTO nominationDTO) {
 
-        // 1. Check for duplicate nomination
-        boolean isDuplicate = nominationRepo.existsByEmployee_nameAndTraining_program_id(
+        // 1. Look up the training program
+        TrainingProgram program = trainingProgramRepo
+                .findById(nominationDTO.getTraining_program_id())
+                .orElseThrow(() -> new RuntimeException("Training program not found: " + nominationDTO.getTraining_program_id()));
+
+        // 2. Look up optional Employee record if exists
+        Employee employee = null;
+        if (nominationDTO.getEmployee_name() != null) {
+            employee = employeeRepo.findByNameIgnoreCase(nominationDTO.getEmployee_name()).orElse(null);
+        }
+
+        // 3. Evaluate extensible eligibility rules (Department, Management grade/service, 12-Month Cooldown, etc.)
+        EligibilityContext context = EligibilityContext.builder()
+                .nominationDTO(nominationDTO)
+                .trainingProgram(program)
+                .employee(employee)
+                .build();
+        eligibilityEngine.validate(context);
+
+        // 4. Check for duplicate nomination
+        boolean isDuplicate = nominationRepo.existsByEmployeeNameAndProgramId(
                 nominationDTO.getEmployee_name(),
                 nominationDTO.getTraining_program_id()
         );
@@ -41,17 +70,12 @@ public class NominationServiceImpl implements NominationService {
             throw new DuplicateNominationException("Employee already nominated for this training program");
         }
 
-        // 2. Look up the training program to get max_capacity
-        TrainingProgram program = trainingProgramRepo
-                .findById(nominationDTO.getTraining_program_id())
-                .orElseThrow(() -> new RuntimeException("Training program not found: " + nominationDTO.getTraining_program_id()));
-
-        // 3. Count current confirmed nominations
-        long confirmedCount = nominationRepo.countByTraining_program_idAndStatus(
+        // 5. Count current confirmed nominations
+        long confirmedCount = nominationRepo.countByProgramIdAndStatus(
                 nominationDTO.getTraining_program_id(), "CONFIRMED"
         );
 
-        // 4. Determine status based on capacity
+        // 6. Determine status based on capacity
         String status;
         if (confirmedCount < program.getMax_capacity()) {
             status = "CONFIRMED";
@@ -59,17 +83,21 @@ public class NominationServiceImpl implements NominationService {
             status = "WAITING";
         }
 
-        // 5. Build and save the Nomination entity
-        Nomination nomination = new Nomination();
-        nomination.setNominate_id(nominationDTO.getNominate_id());
-        nomination.setEmployee_name(nominationDTO.getEmployee_name());
-        nomination.setTraining_program_id(nominationDTO.getTraining_program_id());
-        nomination.setDepartment_id(nominationDTO.getDepartment_id());
-        nomination.setStatus(status);
-        nomination.setNominated_at(LocalDateTime.now());
+        // 7. Build and save the Nomination entity
+        Nomination nomination = Nomination.builder()
+                .nominate_id(nominationDTO.getNominate_id())
+                .employee_name(nominationDTO.getEmployee_name())
+                .training_program_id(nominationDTO.getTraining_program_id())
+                .department_id(nominationDTO.getDepartment_id())
+                .designation(nominationDTO.getDesignation() != null ? nominationDTO.getDesignation() : (employee != null ? employee.getDesignation() : null))
+                .years_of_service(nominationDTO.getYears_of_service() != null ? nominationDTO.getYears_of_service() : (employee != null ? employee.getYears_of_service() : null))
+                .status(status)
+                .nominated_at(LocalDateTime.now())
+                .build();
+
         nominationRepo.save(nomination);
 
-        // 6. Build response
+        // 8. Build response
         String message;
         if ("CONFIRMED".equals(status)) {
             message = "Nomination confirmed successfully! Seat " + (confirmedCount + 1) + " of " + program.getMax_capacity();
@@ -105,7 +133,7 @@ public class NominationServiceImpl implements NominationService {
         String promotedMessage = "";
         if ("CONFIRMED".equals(previousStatus)) {
             Optional<Nomination> firstWaiting = nominationRepo
-                    .findFirstByTraining_program_idAndStatusOrderByNominated_atAsc(trainingProgramId, "WAITING");
+                    .findFirstWaiting(trainingProgramId, "WAITING");
 
             if (firstWaiting.isPresent()) {
                 Nomination promoted = firstWaiting.get();
@@ -125,7 +153,7 @@ public class NominationServiceImpl implements NominationService {
 
     @Override
     public ResponseEntity<ResponseDTO> getAllNominations() {
-        List<Nomination> nominations = nominationRepo.findAllByOrderByNominated_atDesc();
+        List<Nomination> nominations = nominationRepo.findAllOrderByNominatedAtDesc();
 
         ResponseDTO responseDTO = ResponseDTO.builder()
                 .message("Nominations retrieved successfully")
