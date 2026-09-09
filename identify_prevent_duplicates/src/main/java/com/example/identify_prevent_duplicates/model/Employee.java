@@ -11,15 +11,13 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 public class Employee {
+
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    private String employee_Id;
 
     @Column(nullable = false)
     private String name;
 
-    @Column(name = "employee_number", nullable = false, unique = true)
-    private String employeeNumber;
 
 
 }
